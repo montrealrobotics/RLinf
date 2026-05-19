@@ -21,3 +21,6 @@ rlinf/envs/maniskill/assets
 PKG-INFO
 *.egg-info/
 .claude/settings.json
+Openvla-oft-SFT-libero-spatial-traj1/
+RLinf-OpenVLAOFT-LIBERO-90-Base-Lora/
+RLinf-Pi0-RoboCasa/
