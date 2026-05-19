@@ -26,7 +26,7 @@ runner:
     experiment_name: "libero_spatial_grpo_openvlaoft"
     logger_backends: ["tensorboard"] # wandb, swanlab
 
-  max_epochs: 1000
+  max_epochs: 500
   max_steps: -1
 
   only_eval: False
@@ -39,8 +39,8 @@ runner:
 algorithm:
   normalize_advantages: True
   kl_penalty: kl  # how to estimate kl divergence: kl or kl_penalty
-  group_size: 8
-  rollout_epoch: 16
+  group_size: 4
+  rollout_epoch: 4
   eval_rollout_epoch: 1 # set eval_rollout_epoch > 0 when enable runner.only_eval or runner.val_check_interval > 0
 
   reward_type: action_level  # action_level or chunk_level
@@ -87,14 +87,14 @@ env:
 
   # Override the default values in env/libero_spatial
   train:
-    total_num_envs: 64
+    total_num_envs: 8
     group_size: ${algorithm.group_size}
     max_episode_steps: 512 # max episode steps for truncation
     max_steps_per_rollout_epoch: 512
     reward_coef: ${algorithm.reward_coef}
     reset_gripper_open: False
   eval:
-    total_num_envs: 500
+    total_num_envs: 50
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 512
@@ -113,24 +113,27 @@ rollout:
   pipeline_stage_num: 1
 
   model:
-    model_path: "/path/to/model/Openvla-oft-SFT-libero-spatial-traj1/"
+    model_path: "/path/to/model/Openvla-oft-SFT-libero-spatial-traj1" # https://huggingface.co/Haozhan72/Openvla-oft-SFT-libero-spatial-traj1
     precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 32
-  global_batch_size: 16384
+  micro_batch_size: 4
+  global_batch_size: 128
   seed: 1234
   enable_offload: True
 
   # Override the default values in model/openvla_oft
   model:
-    model_path: "/path/to/model/Openvla-oft-SFT-libero-spatial-traj1/"
+    model_path: "/path/to/model/Openvla-oft-SFT-libero-spatial-traj1" # https://huggingface.co/Haozhan72/Openvla-oft-SFT-libero-spatial-traj1
     model_type: "openvla_oft"
 
     unnorm_key: libero_spatial_no_noops
     max_prompt_length: 128
+
+    is_lora: True
+    lora_rank: 32
 
   optim:
     lr: 2.0e-5
