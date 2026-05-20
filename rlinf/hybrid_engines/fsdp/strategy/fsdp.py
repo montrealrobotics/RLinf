@@ -177,7 +177,7 @@ class FSDPStrategy(FSDPStrategyBase):
             device_id=int(os.environ["LOCAL_RANK"]),
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
-            sync_module_states=True,
+            sync_module_states=torch.distributed.get_world_size() > 1,
             device_mesh=device_mesh,
             forward_prefetch=self.cfg.fsdp_config.forward_prefetch,
             backward_prefetch=backward_prefetch,
