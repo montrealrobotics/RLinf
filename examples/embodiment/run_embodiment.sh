@@ -4,8 +4,15 @@ export EMBODIED_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export REPO_PATH=$(dirname $(dirname "$EMBODIED_PATH"))
 export SRC_FILE="${EMBODIED_PATH}/train_embodied_agent.py"
 
-export MUJOCO_GL=${MUJOCO_GL:-"egl"}
-export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-"egl"}
+# On ROCm/AMD systems the NVIDIA EGL ICD is absent; fall back to osmesa.
+if [ -z "$MUJOCO_GL" ]; then
+    if ls /dev/kfd /dev/dri/render* >/dev/null 2>&1 && ! nvidia-smi >/dev/null 2>&1; then
+        export MUJOCO_GL="osmesa"
+    else
+        export MUJOCO_GL="egl"
+    fi
+fi
+export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-"$MUJOCO_GL"}
 export ROBOTWIN_PATH=${ROBOTWIN_PATH:-"/path/to/RoboTwin"}
 export PYTHONPATH=${REPO_PATH}:${ROBOTWIN_PATH}:$PYTHONPATH
 
@@ -49,9 +56,15 @@ fi
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
 
 echo "Using Python at $(which python)"
-LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +'%Y%m%d-%H:%M:%S')"
+LOG_BASE="${LOG_BASE:-${REPO_PATH}/logs}"
+LOG_DIR="${LOG_BASE}/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
-mkdir -p "${LOG_DIR}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || {
+    LOG_BASE="${REPO_PATH}/logs_local"
+    LOG_DIR="${LOG_BASE}/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}"
+    MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
+    mkdir -p "${LOG_DIR}"
+}
 CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}"
 echo ${CMD} > ${MEGA_LOG_FILE}
 ${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}

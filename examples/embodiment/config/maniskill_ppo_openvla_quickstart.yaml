@@ -16,7 +16,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: 0-1
+    actor,env,rollout: all
 
 runner:
   task_type: embodied
@@ -78,7 +78,7 @@ algorithm:
   # max length means max amount of tokens to generate
   length_params:
     max_new_token: 7
-    max_length: 1024
+    max_length: 512
     min_length: 1
 
 env:
@@ -86,7 +86,7 @@ env:
 
   # Override the default values in env/manikill_put_carrot_on_plate_in_scene
   train:
-    total_num_envs: 32
+    total_num_envs: 2
     auto_reset: True
     ignore_terminations: True
     use_fixed_reset_state_ids: False
@@ -94,13 +94,13 @@ env:
     max_steps_per_rollout_epoch: 80
     enable_offload: True
   eval:
-    total_num_envs: 32
+    total_num_envs: 2
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 80
     max_steps_per_rollout_epoch: 80
     use_fixed_reset_state_ids: True
-    group_size: 1
+    group_size: 2
     video_cfg:
       save_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
@@ -115,23 +115,24 @@ rollout:
   pipeline_stage_num: 2
 
   model:
-    model_path: "/path/to/model/openvla-7b-rlvla-warmup/" # https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup
+    model_path: "./openvla-7b-rlvla-warmup/" # https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup
     precision: ${actor.model.precision}
 
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
 
-  micro_batch_size: 20
-  global_batch_size: 160
+  micro_batch_size: 2
+  global_batch_size: 4
   seed: 1234
   enable_offload: True
 
   # Override the default values in model/openvla
   model:
-    model_path: "/path/to/model/openvla-7b-rlvla-warmup/" # https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup
+    model_path: "./openvla-7b-rlvla-warmup/" # https://huggingface.co/gen-robot/openvla-7b-rlvla-warmup
     add_value_head: True
     is_lora: True
+    lora_rank: 16
     max_prompt_length: 30
 
   optim:

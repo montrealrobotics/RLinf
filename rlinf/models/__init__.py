@@ -219,7 +219,12 @@ def get_model(cfg: DictConfig):
         and Worker.torch_platform.is_available()
         and cfg.get("load_to_device", True)
     ):
-        model = model.to(Worker.torch_device_type)
+        # Skip if the model builder already placed weights on GPU (e.g. via
+        # device_map in from_pretrained).  Calling .to() on a model already on
+        # GPU is cheap on NVIDIA but causes a SIGSEGV on ROCm/AMD.
+        first_param = next(iter(model.parameters()), None)
+        if first_param is None or first_param.device.type == "cpu":
+            model = model.to(Worker.torch_device_type)
 
     if cfg.is_lora:
         from peft import LoraConfig, PeftModel, get_peft_model

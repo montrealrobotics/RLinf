@@ -86,6 +86,21 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         for key, val in override_config_kwargs.items():
             setattr(actor_model_config, key, val)
 
+    # Load directly to the accelerator when the caller will place the model on
+    # device.  This avoids a SIGSEGV on ROCm/AMD during the two-phase CPU→GPU
+    # .to() call.  Use an explicit dict device_map (e.g. {"": "cuda:0"}) instead
+    # of "auto" to skip accelerate's get_max_memory/get_balanced_memory, which
+    # also segfaults on ROCm.  Worker.torch_device_type is "cuda" on both NVIDIA
+    # and AMD (ROCm uses PyTorch's CUDA abstraction layer).
+    # When load_to_device is False (e.g. FSDP actor expects a CPU model for
+    # sharding), leave device_map as None so from_pretrained keeps weights on CPU.
+    device_map = None
+    if cfg.get("load_to_device", True):
+        from rlinf.scheduler.worker.worker import Worker
+
+        if Worker.torch_platform is not None and Worker.torch_platform.is_available():
+            device_map = {"": f"{Worker.torch_device_type}:0"}
+
     model = OpenVLAOFTForRLActionPrediction.from_pretrained(
         pretrained_model_name_or_path=cfg.model_path,
         torch_dtype=torch_dtype,
@@ -96,12 +111,14 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         trust_remote_code=True,
         add_value_head=cfg.add_value_head,
         max_prompt_length=cfg.max_prompt_length,
+        device_map=device_map,
     )
 
     # oft add
     model.vision_backbone.set_num_images_in_input(cfg.get("num_images_in_input", 1))
 
-    model.to(torch_dtype)
+    if device_map is None:
+        model.to(torch_dtype)
 
     model_config, input_processor = get_model_config_and_input_processor(cfg)
     model.setup_config_and_processor(model_config, input_processor)

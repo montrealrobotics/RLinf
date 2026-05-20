@@ -400,7 +400,17 @@ configure_amd() {
     PLATFORM_RELAX_TORCHCODEC=1
     PLATFORM_EXTRA_OVERRIDES=()
     if [ -z "${UV_TORCH_BACKEND:-}" ]; then
-        export UV_TORCH_BACKEND="rocm${ROCM_VERSION}"
+        # uv's --torch-backend only knows backends up to rocm7.1. For newer
+        # ROCm versions, passing e.g. rocm7.2 causes "invalid value" errors.
+        # Instead, leave UV_TORCH_BACKEND unset and add the platform torch
+        # index as an extra-index-url so uv can still resolve versioned torch
+        # packages (e.g. torchaudio==2.11.0+rocm7.2) from that index.
+        if [[ "$(printf '%s\n' "7.1" "${ROCM_VERSION}" | sort -V | head -1)" != "${ROCM_VERSION}" ]]; then
+            unset UV_TORCH_BACKEND 2>/dev/null || true
+            export UV_EXTRA_INDEX_URL="${PLATFORM_TORCH_INDEX}"
+        else
+            export UV_TORCH_BACKEND="rocm${ROCM_VERSION}"
+        fi
     fi
 }
 
