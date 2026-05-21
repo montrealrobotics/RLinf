@@ -36,7 +36,41 @@ during model loading. Its PyTorch was compiled for a fixed arch list that exclud
 ```
 
 `HSA_OVERRIDE_GFX_VERSION` overrides don't help — the crash is at ROCm runtime init, before
-kernel dispatch. The fix is native install (see below) or rebuilding the image:
+kernel dispatch.
+
+### Preferred fix: mount host .venv and ROCm into the container (TODO)
+
+No rebuild required. Docker containers share the host kernel, so the ROCm devices (`/dev/kfd`,
+`/dev/dri`) are host interfaces regardless. The working `torch==2.11.0+rocm7.2` from the native
+install can be injected at runtime via volume mounts, bypassing the container's broken PyTorch:
+
+```bash
+docker run -it --rm \
+    --device=/dev/kfd \
+    --device=/dev/dri \
+    --group-add video \
+    --ipc=host \
+    --shm-size 20g \
+    --network host \
+    --name rlinf-amd-libero \
+    -v /home/gberseth/playground/RLinf:/workspace/RLinf \
+    -v /home/gberseth/playground/RLinf/.venv:/workspace/RLinf/.venv \
+    -v /opt/rocm:/opt/rocm \
+    -w /workspace/RLinf \
+    -e LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64 \
+    rlinf/rlinf:agentic-rlinf0.2-libero-rocm6.4 \
+    bash -c "source /workspace/RLinf/.venv/bin/activate && MUJOCO_GL=osmesa ROBOT_PLATFORM=LIBERO bash examples/embodiment/run_embodiment.sh libero_spatial_grpo_openvlaoft"
+```
+
+What each mount does:
+- `.venv` — injects `torch==2.11.0+rocm7.2` (gfx1151-compatible) in place of the container's PyTorch
+- `/opt/rocm` — injects host ROCm 7.2 runtime in place of the container's ROCm 6.4
+- `LD_LIBRARY_PATH` — ensures the container resolves the mounted ROCm libs first
+
+If linker errors appear (libstdc++, glibc mismatches), mount only `/opt/rocm/lib` instead of all
+of `/opt/rocm`.
+
+### Alternative fix: rebuild image with gfx1151 (several hours)
 
 ```bash
 docker build \
@@ -46,7 +80,8 @@ docker build \
     --build-arg 'ROCM_ARCHS=gfx90a;gfx942;gfx1151' \
     -t rlinf-libero-rocm6.4-gfx1151 .
 ```
-(Rebuilds PyTorch from source — takes several hours.)
+(Rebuilds PyTorch from source — takes several hours. Only needed if the mount approach has
+unresolvable library compatibility issues.)
 
 ### Docker run command (for reference)
 
@@ -247,9 +282,8 @@ Note: added `--rm` to auto-remove the container on exit, avoiding future name co
 - [x] Checkpoint shards load successfully (no SIGSEGV)
 - [x] OOM fix: `RAY_memory_usage_threshold=0.99` + reduced batch sizes
 - [x] Onyx: Docker GPU (CDI) fixed, config synced via git, training running
-- [x] Onyx: CUDA arch mismatch diagnosed — pre-built image (CUDA 12.4 / torch 2.6) lacks sm_120 kernels
 - [x] Onyx: `docker/Dockerfile` and `pyproject.toml` updated for CUDA 12.8.1 / torch 2.7.0
 - [x] Onyx: Docker rebuild `rlinf-maniskill-libero-cuda128` — **complete** (139 GB image built successfully)
-- [ ] Confirm full training loop completes a step without crashing (local AMD) — **in progress**: both groups loaded shards, rollout epoch 1/4 running; ~20 min/training step on this hardware
 - [ ] Confirm full training loop completes a step without crashing (Onyx NVIDIA, rebuilt image)
+- [x] Confirm full training loop completes a step without crashing (local AMD) — rollout epoch 1/4 completed, exited cleanly (exit code 0)
 - [ ] Rebuild Docker image with gfx1151 support so training can run locally in Docker (see Docker section for build command)
