@@ -172,6 +172,70 @@ Note: `-v` mounts the host repo so config changes are picked up inside the conta
 Config fixes (`_self_`, `pipeline_stage_num: 1`, `component_placement: "0"`, `total_num_envs: 4`)
 were committed locally, pushed, and pulled on Onyx — training is now running.
 
+### Docker CUDA architecture mismatch (second failure)
+
+After the CDI fix, the container started but crashed during FSDP model init with:
+```
+RuntimeError: CUDA error: no kernel image is available for execution on the device
+```
+
+Root cause: the pre-built image `rlinf/rlinf:agentic-rlinf0.2-maniskill_libero` uses CUDA 12.4.1
+as its base, and `pyproject.toml` pins `torch==2.6.0` (cu124 wheels). Neither has compiled
+kernels for sm_120 (Blackwell). CUDA 12.8+ is required to target sm_120, and PyTorch 2.7.0 is
+the first stable release to ship cu128 wheels with sm_120 support.
+
+Secondary issue: the container exited but was not removed (no `--rm`), so a subsequent
+`docker run --name rlinf` fails with a name conflict. Always use `--rm` or `docker rm rlinf`
+before re-running.
+
+Fix: rebuild the image from a CUDA 12.8.1 base with PyTorch 2.7.0:
+
+- `docker/Dockerfile`: `CUDA_VER=12.4.1` → `12.8.1`
+- `pyproject.toml`: `torch==2.6.0` / `torchvision==0.21.0` / `torchaudio==2.6.0`
+  → `torch==2.7.0` / `torchvision==0.22.0` / `torchaudio==2.7.0`
+
+Build command (takes several hours):
+```bash
+docker build \
+    --build-arg BUILD_TARGET=embodied-maniskill_libero \
+    --build-arg NO_MIRROR=1 \
+    -t rlinf-maniskill-libero-cuda128 \
+    -f docker/Dockerfile .
+```
+
+#### Build failures due to flaky git clones
+
+Two additional Dockerfile changes were needed to get the build to complete:
+
+1. **GnuTLS recv error -54** (`Error in the pull function`) — git was using HTTP/2, which
+   multiplexes connections and is sensitive to mid-transfer drops. Fixed by adding
+   `http.version HTTP/1.1` to the global git config in the Dockerfile.
+
+2. **All-or-nothing `RUN` step** — the original Dockerfile installed all six venvs
+   (`openvla`, `openvla-oft`, `openpi`, `gr00t`, `dexbotic`, `starvla`) in a single
+   `RUN` instruction. A git clone failure on any one venv invalidated the entire layer,
+   forcing a full restart from scratch. Fixed by splitting into one `RUN` per venv so
+   Docker caches each success independently.
+
+3. **`UV_GIT_FETCH_WITH_CLI=true`** — forces uv to use the system git (and therefore the
+   HTTP/1.1 config above) instead of its bundled git client, so the fix applies to both
+   uv-sourced and install.sh-sourced git operations.
+
+### Docker run command (Onyx, rebuilt image)
+
+```bash
+docker run -it --rm --gpus all \
+    --shm-size 100g \
+    --net=host \
+    -e NVIDIA_DRIVER_CAPABILITIES=all \
+    -v /home/gberseth/playground/RLinf:/workspace/RLinf \
+    -w /workspace/RLinf \
+    rlinf-maniskill-libero-cuda128 \
+    bash -c "source switch_env openvla-oft && bash examples/embodiment/run_embodiment.sh libero_spatial_grpo_openvlaoft"
+```
+
+Note: added `--rm` to auto-remove the container on exit, avoiding future name conflicts.
+
 ---
 
 ## Status
@@ -183,6 +247,9 @@ were committed locally, pushed, and pulled on Onyx — training is now running.
 - [x] Checkpoint shards load successfully (no SIGSEGV)
 - [x] OOM fix: `RAY_memory_usage_threshold=0.99` + reduced batch sizes
 - [x] Onyx: Docker GPU (CDI) fixed, config synced via git, training running
+- [x] Onyx: CUDA arch mismatch diagnosed — pre-built image (CUDA 12.4 / torch 2.6) lacks sm_120 kernels
+- [x] Onyx: `docker/Dockerfile` and `pyproject.toml` updated for CUDA 12.8.1 / torch 2.7.0
+- [x] Onyx: Docker rebuild `rlinf-maniskill-libero-cuda128` — **complete** (139 GB image built successfully)
 - [ ] Confirm full training loop completes a step without crashing (local AMD) — **in progress**: both groups loaded shards, rollout epoch 1/4 running; ~20 min/training step on this hardware
-- [ ] Confirm full training loop completes a step without crashing (Onyx NVIDIA)
+- [ ] Confirm full training loop completes a step without crashing (Onyx NVIDIA, rebuilt image)
 - [ ] Rebuild Docker image with gfx1151 support so training can run locally in Docker (see Docker section for build command)

@@ -4,7 +4,7 @@ ARG TARGETARCH
 ARG PLATFORM=nvidia
 # Per-platform runtime versions. Override these for common CUDA/ROCm/CANN bumps, or
 # override the full base-image args below for a different image family/Ubuntu.
-ARG CUDA_VER=12.4.1
+ARG CUDA_VER=12.8.1
 ARG ROCM_VER=6.4
 ARG ROCM_ARCHS=gfx90a;gfx942
 ARG CANN_VER=9.0.0-910b
@@ -91,6 +91,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git vim libibverbs-dev openssh-server sudo runit runit-systemd tmux \
     build-essential python3-dev cmake pkg-config iproute2 pciutils python3 python3-pip \
     wget unzip curl
+
+# Make git resilient to slow/flaky connections during large clones (e.g. ManiSkill, LIBERO).
+# http.version HTTP/1.1 avoids GnuTLS recv error -54 (connection drop on HTTP/2 multiplexing).
+RUN git config --global http.postBuffer 524288000 && \
+    git config --global http.lowSpeedLimit 0 && \
+    git config --global http.lowSpeedTime 999999 && \
+    git config --global http.version HTTP/1.1
+
+# Force uv to use the system git (above) rather than its bundled git so the
+# config above applies to uv's git-sourced dependencies too.
+ENV UV_GIT_FETCH_WITH_CLI=true
 
 
 ##################################################################################################
@@ -197,13 +208,14 @@ RUN chmod +x /usr/local/bin/download_assets
 ##################################################################################################
 FROM embodied-common-image AS embodied-maniskill_libero-image
 
-# Install openvla env
-RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openvla --model openvla --env maniskill_libero && \
-    bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openvla-oft --model openvla-oft --env maniskill_libero && \
-    bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openpi --model openpi --env maniskill_libero && \
-    bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv gr00t --model gr00t --env maniskill_libero && \
-    bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv dexbotic --model dexbotic --env maniskill_libero && \
-    bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv starvla --model starvla --env maniskill_libero
+# Install each venv in its own layer so Docker caches successes independently.
+# A network hiccup on one clone only retries that venv, not all six.
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openvla --model openvla --env maniskill_libero
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openvla-oft --model openvla-oft --env maniskill_libero
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv openpi --model openpi --env maniskill_libero
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv gr00t --model gr00t --env maniskill_libero
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv dexbotic --model dexbotic --env maniskill_libero
+RUN bash requirements/install.sh ${INSTALL_MIRROR_OPTION} --platform ${RLINF_PLATFORM} embodied --venv starvla --model starvla --env maniskill_libero
 
 RUN source switch_env openvla && download_assets --dir /opt/assets --assets maniskill,openpi
 RUN link_assets
